@@ -1,3 +1,5 @@
+import streamlit as st
+import pandas as pd
 
 students = {
     "Kavitha": 85,
@@ -13,12 +15,22 @@ average = total / len(students)
 highest = max(students, key=students.get)
 lowest = min(students, key=students.get)
 
-print("STUDENT PERFORMANCE ANALYSIS")
+st.title("📊 Student Performance Analysis")
 
-for name, marks in students.items():
-    print(name, ":", marks)
+c1, c2 = st.columns(2)
+c1.metric("Total Marks", total)
+c2.metric("Average", round(average, 2))
 
-print("Total Marks:", total)
-print("Average Marks:", average)
-print("Highest Scorer:", highest)
-print("Lowest Scorer:", lowest)
+c3, c4 = st.columns(2)
+c3.metric("Highest", f"{highest} ({students[highest]})")
+c4.metric("Lowest", f"{lowest} ({students[lowest]})")
+
+df = pd.DataFrame(
+    list(students.items()), columns=["Student", "Marks"]
+)
+
+st.subheader("Marks Chart")
+st.bar_chart(df, x="Student", y="Marks")
+
+st.subheader("Student Marks Table")
+st.dataframe(df, hide_index=True)
