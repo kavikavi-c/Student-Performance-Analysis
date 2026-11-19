@@ -73,8 +73,27 @@ c4.metric("Lowest", f"{low['Student']} ({low['Marks']})")
 
 st.metric("Pass Percentage", f"{pass_pct:.0f}%")
 
+st.subheader("🔍 Search Student")
+name = st.text_input("Type a student name")
+if name:
+    found = df[df["Student"].astype(str).str.contains(name, case=False, na=False)]
+    if found.empty:
+        st.warning("No student found.")
+    else:
+        st.dataframe(found, hide_index=True)
+
+choice = st.selectbox("Or select a student", df["Student"])
+row = df[df["Student"] == choice].iloc[0]
+d1, d2, d3 = st.columns(3)
+d1.metric("Marks", int(row["Marks"]))
+d2.metric("Grade", row["Grade"])
+d3.metric("Result", row["Result"])
+
 st.subheader("Marks Chart")
 st.bar_chart(df, x="Student", y="Marks")
+
+st.subheader("Pass / Fail Chart")
+st.bar_chart(df["Result"].value_counts())
 
 st.subheader("Subject-wise Average")
 st.bar_chart(df[subjects].mean())
