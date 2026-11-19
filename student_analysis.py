@@ -1,14 +1,49 @@
 import streamlit as st
 import pandas as pd
 
-subjects = ["Maths", "Science", "English"]
+st.set_page_config(page_title="Student Performance Analysis", page_icon="📊")
+st.title("📊 Student Performance Analysis")
 
-df = pd.DataFrame({
+sample = pd.DataFrame({
     "Student": ["Kavitha", "Priya", "Arun", "Divya", "Ravi"],
     "Maths":   [88, 92, 78, 97, 68],
     "Science": [82, 88, 72, 93, 62],
     "English": [85, 90, 75, 95, 65],
 })
+
+st.download_button(
+    "⬇️ Download sample CSV",
+    sample.to_csv(index=False),
+    file_name="sample_students.csv",
+    mime="text/csv",
+)
+
+uploaded = st.file_uploader("Upload a CSV file (optional)", type="csv")
+
+if uploaded is not None:
+    try:
+        df = pd.read_csv(uploaded)
+    except Exception:
+        st.error("Could not read the file. Please upload a valid CSV.")
+        st.stop()
+else:
+    df = sample.copy()
+    st.info("Showing sample data. Upload a CSV to analyze your own data.")
+
+if "Student" not in df.columns:
+    st.error("The CSV must have a 'Student' column.")
+    st.stop()
+
+subjects = [c for c in df.columns if c != "Student"]
+if not subjects:
+    st.error("The CSV needs at least one subject column.")
+    st.stop()
+
+df[subjects] = df[subjects].apply(pd.to_numeric, errors="coerce")
+df = df.dropna(subset=subjects)
+if df.empty:
+    st.error("No valid marks found in the file.")
+    st.stop()
 
 df["Marks"] = df[subjects].mean(axis=1).round().astype(int)
 
@@ -28,10 +63,8 @@ top = df.loc[df["Marks"].idxmax()]
 low = df.loc[df["Marks"].idxmin()]
 pass_pct = (df["Result"] == "Pass").mean() * 100
 
-st.title("📊 Student Performance Analysis")
-
 c1, c2 = st.columns(2)
-c1.metric("Total Marks", total)
+c1.metric("Total Marks", int(total))
 c2.metric("Average", round(average, 2))
 
 c3, c4 = st.columns(2)
