@@ -1,7 +1,24 @@
 import streamlit as st
 import pandas as pd
 
+try:
+    from fpdf import FPDF
+    PDF_OK = True
+except ImportError:
+    PDF_OK = False
+
 st.set_page_config(page_title="Student Performance Analysis", page_icon="📊")
+st.markdown(
+    """<style>
+    div[data-testid="stMetric"] {
+        background: rgba(128,128,128,0.10);
+        border: 1px solid rgba(128,128,128,0.25);
+        padding: 10px 14px;
+        border-radius: 10px;
+    }
+    </style>""",
+    unsafe_allow_html=True,
+)
 st.title("📊 Student Performance Analysis")
 st.caption("Analyze student marks, grades and results from a CSV file.")
 
@@ -104,6 +121,7 @@ with st.expander("🎛️ Filters", expanded=False):
                                   default=df["Student"].tolist())
     sel_subjects = st.multiselect("Subjects", subjects, default=subjects)
     sel_grades = st.multiselect("Grades", GRADES, default=GRADES)
+    weak_limit = st.slider("Weak performance limit (marks below)", 0, 100, 60)
 
 if not sel_students or not sel_subjects or not sel_grades:
     st.warning("Please select at least one student, subject and grade.")
@@ -133,9 +151,82 @@ average = df["Marks"].mean()
 top = df.loc[df["Marks"].idxmax()]
 low = df.loc[df["Marks"].idxmin()]
 pass_pct = (df["Result"] == "Pass").mean() * 100
+std_val = float(df["Marks"].std()) if len(df) > 1 else 0.0
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["📈 Overview", "📐 Statistics", "🔍 Search", "📚 Subjects", "📋 Data"]
+# ---------- Insights ----------
+subj_avg = df[subjects].mean().sort_values()
+weakest_subj, strongest_subj = subj_avg.index[0], subj_avg.index[-1]
+weak_df = df[df["Marks"] < weak_limit].copy()
+weak_df["Weakest Subject"] = weak_df[subjects].idxmin(axis=1)
+below_counts = (df[subjects] < weak_limit).sum()
+
+insights = [
+    f"Class average is {average:.1f}. Top performer: {top['Student']} ({top['Marks']}).",
+    f"Strongest subject: {strongest_subj} (average {subj_avg.iloc[-1]:.1f}).",
+    f"Weakest subject: {weakest_subj} (average {subj_avg.iloc[0]:.1f}).",
+]
+if weak_df.empty:
+    insights.append(f"No student is below {weak_limit} marks.")
+else:
+    insights.append(
+        f"{len(weak_df)} student(s) below {weak_limit} marks: "
+        + ", ".join(weak_df["Student"]) + "."
+    )
+if below_counts.max() > 0:
+    insights.append(
+        f"Most students below {weak_limit} in: {below_counts.idxmax()} "
+        f"({int(below_counts.max())} student(s))."
+    )
+
+# ---------- PDF report ----------
+def clean(t):
+    return str(t).encode("latin-1", "replace").decode("latin-1")
+
+def build_pdf():
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "Student Performance Report", new_x="LMARGIN",
+             new_y="NEXT", align="C")
+    pdf.ln(2)
+    pdf.set_font("Helvetica", size=11)
+    summary = {
+        "Students": len(df),
+        "Class average": round(average, 2),
+        "Median": round(df["Marks"].median(), 2),
+        "Std deviation": round(std_val, 2),
+        "Highest": f"{top['Student']} ({top['Marks']})",
+        "Lowest": f"{low['Student']} ({low['Marks']})",
+        "Pass percentage": f"{pass_pct:.0f}%",
+    }
+    for k, v in summary.items():
+        pdf.cell(0, 7, clean(f"{k}: {v}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(3)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "Insights", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", size=10)
+    for line in insights:
+        pdf.multi_cell(0, 6, clean("- " + line), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(3)
+    cols = ["Student"] + subjects + ["Marks", "Grade", "Result"]
+    w = 190 / len(cols)
+    pdf.set_font("Helvetica", "B", 9)
+    for c in cols:
+        pdf.cell(w, 7, clean(c)[:12], border=1, align="C")
+    pdf.ln()
+    pdf.set_font("Helvetica", size=9)
+    for _, r in df.iterrows():
+        for c in cols:
+            v = r[c]
+            if isinstance(v, float):
+                v = round(v, 1)
+            pdf.cell(w, 7, clean(v)[:12], border=1, align="C")
+        pdf.ln()
+    return bytes(pdf.output())
+
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    ["📈 Overview", "📐 Statistics", "💡 Insights",
+     "🔍 Search", "📚 Subjects", "📋 Data"]
 )
 
 with tab1:
@@ -162,14 +253,12 @@ with tab2:
     s2.metric("Median", round(m.median(), 2))
     s3, s4 = st.columns(2)
     s3.metric("Mode", mode_val)
-    s4.metric("Std Deviation", round(float(m.std()) if len(m) > 1 else 0.0, 2))
-
+    s4.metric("Std Deviation", round(std_val, 2))
     st.subheader("Performance Distribution")
     bins = [-1, 39, 59, 69, 79, 89, 100]
     labels = ["Below 40", "40-59", "60-69", "70-79", "80-89", "90-100"]
     dist = pd.cut(m, bins=bins, labels=labels).value_counts(sort=False)
     st.bar_chart(dist, color="#6A1B9A")
-
     st.subheader("Subject-wise Statistics")
     stats = pd.DataFrame({
         "Mean": df[subjects].mean(),
@@ -182,6 +271,22 @@ with tab2:
     st.dataframe(stats)
 
 with tab3:
+    st.subheader("Key Insights")
+    for line in insights:
+        st.write("• " + line)
+    st.subheader(f"Weak Students (below {weak_limit})")
+    if weak_df.empty:
+        st.success("No weak-performing students. Great job!")
+    else:
+        st.warning(f"{len(weak_df)} student(s) need attention.")
+        st.dataframe(weak_df[["Student", "Marks", "Grade", "Weakest Subject"]],
+                     hide_index=True)
+    st.subheader("Subject Averages (weakest first)")
+    st.bar_chart(subj_avg, color="#C62828")
+    st.subheader(f"Students below {weak_limit} in each subject")
+    st.bar_chart(below_counts, color="#AD1457")
+
+with tab4:
     name = st.text_input("Type a student name")
     if name:
         found = df[df["Student"].str.contains(name, case=False, na=False)]
@@ -196,7 +301,7 @@ with tab3:
     d2.metric("Grade", row["Grade"])
     d3.metric("Result", row["Result"])
 
-with tab4:
+with tab5:
     st.subheader("Subject-wise Average")
     st.bar_chart(df[subjects].mean())
     st.subheader("Subject Toppers")
@@ -209,8 +314,15 @@ with tab4:
     st.subheader("Student-wise Subject Marks")
     st.bar_chart(df.set_index("Student")[subjects])
 
-with tab5:
+with tab6:
     st.subheader("Student Marks Table")
     st.dataframe(df, hide_index=True)
-    st.download_button("⬇️ Download results CSV", df.to_csv(index=False),
+    d1, d2 = st.columns(2)
+    d1.download_button("⬇️ Results CSV", df.to_csv(index=False),
                        file_name="student_results.csv", mime="text/csv")
+    if PDF_OK:
+        d2.download_button("⬇️ PDF Report", build_pdf(),
+                           file_name="student_report.pdf",
+                           mime="application/pdf")
+    else:
+        st.info("PDF download needs 'fpdf2' in requirements.txt.")
